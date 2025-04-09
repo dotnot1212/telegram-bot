@@ -1,35 +1,46 @@
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Chat
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler
 import asyncio
-from pymongo import MongoClient
+from supabase import create_client
 import os
 
-# توکن رباتت
-TOKEN = "8083629204:AAEDIDO-WNXyo8CDlEwx8LBFnJPK3suJhaQ"
+# توکن ربات و اطلاعات Supabase از متغیرهای محیطی
+TOKEN = os.getenv("TELEGRAM_TOKEN", "8083629204:AAEDIDO-WNXyo8CDlEwx8LBFnJPK3suJhaQ")
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://unovxhmvnbrwvwuskfaa.supabase.co")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVub3Z4aG12bmJyd3Z3dXNrZmFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2NzI4NTEsImV4cCI6MjA1OTI0ODg1MX0.8Ixzegd_V8os6CzxIYq13iDv8G5tfz4GggK5ImQntnA")
 
-# اتصال به MongoDB (رشته اتصال بعداً از متغیر محیطی میاد)
-MONGO_URI = os.getenv("MONGO_URI", "mongodb+srv://<username>:<password>@cluster0.xxx.mongodb.net/telegram_bot_db?retryWrites=true&w=majority")
-client = MongoClient(MONGO_URI)
-db = client["telegram_bot_db"]  # اسم دیتابیس
-users_collection = db["users"]  # کالکشن برای ذخیره کاربرها
+# اتصال به Supabase
+supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 # ذخیره آیدی کاربرها
 def save_user(chat_id):
-    users_collection.update_one({"chat_id": chat_id}, {"$set": {"chat_id": chat_id}}, upsert=True)
+    try:
+        supabase.table("users").upsert({"chat_id": chat_id}).execute()
+    except Exception as e:
+        print(f"Error saving user {chat_id}: {e}")
 
 # حذف کاربر از لیست
 def remove_user(chat_id):
-    result = users_collection.delete_one({"chat_id": chat_id})
-    return result.deleted_count > 0
+    try:
+        response = supabase.table("users").delete().eq("chat_id", chat_id).execute()
+        return len(response.data) > 0
+    except Exception as e:
+        print(f"Error removing user {chat_id}: {e}")
+        return False
 
 # لود کردن لیست کاربرها
 def load_users():
-    return {doc["chat_id"] for doc in users_collection.find()}
+    try:
+        response = supabase.table("users").select("chat_id").execute()
+        return {row["chat_id"] for row in response.data}
+    except Exception as e:
+        print(f"Error loading users: {e}")
+        return set()
 
 # منوی اصلی
 async def start(update, context):
     chat_id = update.effective_chat.id
-    save_user(chat_id)  # ذخیره آیدی کاربر
+    save_user(chat_id)
     keyboard = [
         [InlineKeyboardButton("اعضای تیم‌ها", callback_data='team_members')],
         [InlineKeyboardButton("داورها", callback_data='judges')],
@@ -52,7 +63,10 @@ async def stop(update, context):
 # حذف پیام
 def delete_message(context):
     bot, chat_id, message_id = context.job_context
-    bot.delete_message(chat_id=chat_id, message_id=message_id)
+    try:
+        bot.delete_message(chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        print(f"Error deleting message: {e}")
 
 # مدیریت گزینه‌ها
 async def button(update, context):
@@ -97,7 +111,6 @@ async def channel_post(update, context):
     message = update.channel_post
     channel_id = message.chat_id
 
-    # چک کردن وجود #خبر
     if message.text and "#خبر" in message.text:
         users = load_users()
         for user_id in users:
