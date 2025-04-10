@@ -4,40 +4,38 @@ import asyncio
 from supabase import create_client
 import os
 
-# توکن ربات و اطلاعات Supabase از متغیرهای محیطی
 TOKEN = os.getenv("TELEGRAM_TOKEN", "8083629204:AAEDIDO-WNXyo8CDlEwx8LBFnJPK3suJhaQ")
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://unovxhmvnbrwvwuskfaa.supabase.co")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InVub3Z4aG12bmJyd3Z3dXNrZmFhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDM2NzI4NTEsImV4cCI6MjA1OTI0ODg1MX0.8Ixzegd_V8os6CzxIYq13iDv8G5tfz4GggK5ImQntnA")
 
-# اتصال به Supabase
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-# ذخیره آیدی کاربرها
 def save_user(chat_id):
     try:
         supabase.table("users").upsert({"chat_id": chat_id}).execute()
+        print(f"User {chat_id} saved")
     except Exception as e:
         print(f"Error saving user {chat_id}: {e}")
 
-# حذف کاربر از لیست
 def remove_user(chat_id):
     try:
         response = supabase.table("users").delete().eq("chat_id", chat_id).execute()
+        print(f"User {chat_id} removed: {len(response.data) > 0}")
         return len(response.data) > 0
     except Exception as e:
         print(f"Error removing user {chat_id}: {e}")
         return False
 
-# لود کردن لیست کاربرها
 def load_users():
     try:
         response = supabase.table("users").select("chat_id").execute()
-        return {row["chat_id"] for row in response.data}
+        users = {row["chat_id"] for row in response.data}
+        print(f"Loaded users: {users}")
+        return users
     except Exception as e:
         print(f"Error loading users: {e}")
         return set()
 
-# منوی اصلی
 async def start(update, context):
     chat_id = update.effective_chat.id
     save_user(chat_id)
@@ -52,7 +50,6 @@ async def start(update, context):
     message = await update.message.reply_text("به ربات خوش اومدی! یه گزینه انتخاب کن:\nبرای لغو اشتراک: /stop", reply_markup=reply_markup)
     context.job_queue.run_once(delete_message, 60, context=(context.bot, message.chat_id, message.message_id))
 
-# دستور لغو اشتراک
 async def stop(update, context):
     chat_id = update.effective_chat.id
     if remove_user(chat_id):
@@ -60,7 +57,6 @@ async def stop(update, context):
     else:
         await update.message.reply_text("شما تو لیست نبودید! برای اشتراک: /start")
 
-# حذف پیام
 def delete_message(context):
     bot, chat_id, message_id = context.job_context
     try:
@@ -68,7 +64,6 @@ def delete_message(context):
     except Exception as e:
         print(f"Error deleting message: {e}")
 
-# مدیریت گزینه‌ها
 async def button(update, context):
     query = update.callback_query
     await query.answer()
@@ -102,24 +97,24 @@ async def button(update, context):
 
     context.job_queue.run_once(delete_message, 60, context=(context.bot, chat_id, message.message_id))
 
-# فیلتر برای پست‌های کانال
 def is_channel_post(update):
     return update.channel_post and update.channel_post.chat.type == Chat.CHANNEL
 
-# هندل کردن پست‌های کانال
 async def channel_post(update, context):
     message = update.channel_post
     channel_id = message.chat_id
+    print(f"Channel post received: {message.text}")  # دیباگ
 
     if message.text and "#خبر" in message.text:
         users = load_users()
+        print(f"Forwarding to users: {users}")  # دیباگ
         for user_id in users:
             try:
                 await context.bot.forward_message(chat_id=user_id, from_chat_id=channel_id, message_id=message.message_id)
+                print(f"Forwarded to {user_id}")
             except Exception as e:
-                print(f"خطا در ارسال به {user_id}: {e}")
+                print(f"Error forwarding to {user_id}: {e}")
 
-# راه‌اندازی ربات
 def main():
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
